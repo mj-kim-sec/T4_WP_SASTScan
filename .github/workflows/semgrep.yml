@@ -131,6 +131,3 @@ jobs:
             ${{ env.REPORTS_DIR }}/*.sarif
           if-no-files-found: warn
 
-      - name: Prune old reports (keep last 20)
-        run: python scripts/prune_reports.py
-
