@@ -67,12 +67,50 @@ jobs:
           fi
 
       # JSON 출력 (에러 숨김 없음)
-      - name: Semgrep JSON
+      - name: Semgrep JSON (debug mode)
+        shell: bash
         run: |
-          set -e
-          semgrep scan --config "$CONFIG" \
-            --metrics=off --timeout 10 \
-            --json -o reports/semgrep.json
+          set -x
+          echo "=== semgrep version ==="
+          semgrep --version || true
+          echo
+
+          echo "=== pip package info ==="
+          python -c "import pkgutil,sys; import semgrep,inspect; print('semgrep', semgrep.__version__)" || true
+          echo
+
+          echo "=== show CONFIG env ==="
+          echo "CONFIG='$CONFIG'"
+          echo
+
+          echo "=== list .semgrep dir & files ==="
+          ls -la .semgrep || true
+          echo "=== list included rule files (if any) ==="
+          if [ -f ".semgrep/.semgrep.yml" ]; then
+            grep -n "include" -n .semgrep/.semgrep.yml || true
+            sed -n '1,200p' .semgrep/.semgrep.yml || true
+          fi
+          echo
+
+          echo "=== attempt semgrep dry-run with debug logging ==="
+          mkdir -p reports
+          # Run with --debug and capture both stdout & stderr to files so they appear in Actions log
+          semgrep scan --config "$CONFIG" --metrics=off --timeout 10 --json -o reports/semgrep.json --debug 2>reports/semgrep-debug.err | tee reports/semgrep-debug.out
+          RC=$?
+          echo "semgrep exit code: $RC"
+          echo "---- semgrep stdout (tail) ----"
+          tail -n +1 reports/semgrep-debug.out || true
+          echo "---- semgrep stderr (tail) ----"
+          tail -n +1 reports/semgrep-debug.err || true
+
+          if [ -s reports/semgrep.json ]; then
+            echo "JSON produced with $(jq '.results | length' reports/semgrep.json) results"
+          else
+            echo "No JSON produced"
+          fi
+          # fail the step with the same rc so Actions will show failure (remove if you want it not to fail)
+          exit $RC
+
 
       # SARIF 출력 (에러 숨김 없음)
       - name: Semgrep SARIF
