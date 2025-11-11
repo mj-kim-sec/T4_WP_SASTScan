@@ -1,6 +1,7 @@
 ﻿# .semgrep/.semgrep.yml
-# ---------------------
-# 怨듭떇 packs
+# Semgrep configs + 프로젝트 커스텀 rules 통합
+
+# 공식 packs
 configs:
   - p/ci
   - p/security-audit
@@ -8,13 +9,103 @@ configs:
   - p/php
   - p/javascript
 
-# 濡쒖뺄 洹쒖튃??理쒖긽??rules ?꾨옒 ?ы븿
+# 프로젝트 커스텀 rules
 rules:
-  - include: .semgrep/rules-xss.yml
-  - include: .semgrep/rules-upload.yml
-  - include: .semgrep/rules-sensitive.yml
+  # --- XSS rules ---
+  - id: wp-xss-taint-to-output
+    message: "XSS: user-controlled data flows to output without escaping."
+    languages: [php]
+    severity: ERROR
+    mode: taint
+    pattern-sources:
+      - pattern: $_GET[$X]
+      - pattern: $_POST[$X]
+      - pattern: $_REQUEST[$X]
+      - pattern: $_COOKIE[$X]
+    pattern-sanitizers:
+      - pattern: esc_html($X)
+      - pattern: esc_attr($X)
+      - pattern: esc_url($X)
+      - pattern: esc_js($X)
+      - pattern: wp_kses($X, $ALLOWED)
+      - pattern: wp_kses_post($X)
+      - pattern: sanitize_text_field($X)
+      - pattern: sanitize_user($X, ...)
+      - pattern: sanitize_email($X)
+      - pattern: htmlspecialchars($X, ...)
+      - pattern: strip_tags($X)
+    pattern-sinks:
+      - pattern: echo $SINK;
+      - pattern: print $SINK;
+      - pattern: printf($F, $SINK, ...);
+      - pattern: vprintf($F, $SINKS);
+      - pattern: echo sprintf($F, $SINK, ...);
+      - pattern: print sprintf($F, $SINK, ...);
 
-# 湲곕낯 ?쒖쇅
+  # --- Upload rules ---
+  - id: wp-file-upload-move-raw
+    languages: [php]
+    severity: ERROR
+    message: "File upload saved without explicit type/extension checks."
+    pattern: move_uploaded_file($_FILES[$X]['tmp_name'], $DEST);
+
+  - id: wp-file-upload-handle-basic
+    languages: [php]
+    severity: WARNING
+    message: "wp_handle_upload used; ensure filetype/extension validation and sanitize_file_name."
+    pattern: wp_handle_upload($_FILES[$X], ...);
+
+  - id: wp-file-upload-into-webroot
+    languages: [php]
+    severity: WARNING
+    message: "Uploaded file moved into webroot; ensure executables are disallowed."
+    patterns:
+      - pattern: |
+          $dest = $DIR . $_FILES[$X]['name'];
+          ...
+          move_uploaded_file($_FILES[$X]['tmp_name'], $dest);
+
+  # --- Sensitive file rules ---
+  - id: wp-sensitive-path-taint-to-file-apis
+    message: 'Sensitive file exposure: user-controlled path flows to file/require APIs.'
+    languages: [php]
+    severity: ERROR
+    mode: taint
+    pattern-sources:
+      - pattern: $_GET[$X]
+      - pattern: $_POST[$X]
+      - pattern: $_REQUEST[$X]
+      - pattern: $_COOKIE[$X]
+    pattern-sanitizers:
+      - pattern: validate_file($X)
+      - pattern: realpath($X)
+      - pattern: basename($X)
+      - pattern: wp_normalize_path($X)
+      - pattern: sanitize_file_name($X)
+    pattern-sinks:
+      - pattern: file_get_contents($P);
+      - pattern: readfile($P);
+      - pattern: fopen($P, $M);
+      - pattern: file($P);
+      - pattern: include $P;
+      - pattern: require $P;
+      - pattern: include_once $P;
+      - pattern: require_once $P;
+
+  - id: wp-sensitive-serve-direct
+    languages: [php]
+    severity: WARNING
+    message: 'Direct file serving from user parameter may expose sensitive files.'
+    metadata: { cwe: 'CWE-200', category: security }
+    patterns:
+      - pattern-inside: |
+          if (isset($_GET['file'])) {
+            $file = $_GET['file'];
+            ...
+          }
+      - pattern: readfile($file);
+
+# 제외 폴더
 exclude:
   - node_modules
   - vendor
@@ -26,9 +117,8 @@ exclude:
   - wp-includes/**
   - wp-admin/**
 
-# 寃?ы븷 寃쎈줈
+# 검사 대상 경로
 paths:
   include:
     - "src/**"
     - "**/*.php"
-
